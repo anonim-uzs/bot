@@ -1,98 +1,86 @@
-
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 import asyncio
+import sqlite3
 
-BOT_TOKEN = "8827275523:AAF19lC2WCesrFvzP1g7uCbD3Jv3Ngo7lCI"
-ADMINS = [7844472879, , ]  # Adminlar ID ro'yxati
+BOT_TOKEN = "8827275523:AAGx5RiXv3KJtLGSt_vz6vGJb8uOncjtIKE"
+ADMINS = [7844472879, , ]
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# --- BAZA OCHISH ---
+def init_db():
+    conn = sqlite3.connect("bot.db")
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, is_answered INTEGER DEFAULT 0)")
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# --- START BUYRUG'I ---
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
-    await message.answer(
-        f"Assalomu alaykum, {message.from_user.first_name}!\n"
-        "Savolingizni yozib qoldiring, adminlarimiz tez orada javob berishadi."
-    )
-
-# 1. FOYDALANUVCHIDAN XABAR OLISH VA BARCHA ADMINGA YUBORISH
-@dp.message(F.chat.type == "private", ~F.from_user.id.in_(ADMINS))
-async def handle_user_messages(message: types.Message):
-    user_id = message.from_user.id
-    text = message.text if message.text else "[Matnli bo'lmagan xabar]"
-    username = f"@{message.from_user.username}" if message.from_user.username else "Mavjud emas"
-
-    # Xabar matni (barcha adminlarga bir xil formatda boradi)
-    admin_text = (
-        f"📩 **Yangi xabar keldi!**\n\n"
-        f"👤 Kimdan: {message.from_user.full_name}\n"
-        f"🆔 User ID: `{user_id}`\n"
-        f"🌐 Username: {username}\n\n"
-        f"💬 Xabar:\n{text}"
-    )
+    conn = sqlite3.connect("bot.db")
+    conn.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (message.from_user.id,))
+    conn.commit()
+    conn.close()
     
-    # Xabarni hamma adminga tarqatamiz
+    if message.from_user.id in ADMINS:
+        builder = ReplyKeyboardBuilder()
+        builder.button(text="📊 Statistika")
+        await message.answer("Admin paneliga xush kelibsiz!", reply_markup=builder.as_markup(resize_keyboard=True))
+    else:
+        await message.answer("Assalomu alaykum! Savolingizni yoki rasmingizni yuboring.")
+
+# --- STATISTIKA ---
+@dp.message(F.text == "📊 Statistika", F.from_user.id.in_(ADMINS))
+async def show_stats(message: types.Message):
+    conn = sqlite3.connect("bot.db")
+    u = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    ans = conn.execute("SELECT COUNT(*) FROM messages WHERE is_answered = 1").fetchone()[0]
+    unans = conn.execute("SELECT COUNT(*) FROM messages WHERE is_answered = 0").fetchone()[0]
+    conn.close()
+    await message.answer(f"📊 **Statistika:**\n\n✅ Javob berilgan: {ans} ta\n⏳ Javob berilmagan: {unans} ta\n👤 Umumiy foydalanuvchilar: {u} ta")
+
+# --- FOYDALANUVCHI XABARI ---
+@dp.message(~F.from_user.id.in_(ADMINS))
+async def handle_user_messages(message: types.Message):
+    conn = sqlite3.connect("bot.db")
+    conn.execute("INSERT INTO messages (is_answered) VALUES (0)")
+    conn.commit()
+    conn.close()
+    
     for admin_id in ADMINS:
         try:
-            await bot.send_message(chat_id=admin_id, text=admin_text, parse_mode="Markdown")
-        except Exception as e:
-            print(f"Admin {admin_id} botni bloklagan bo'lishi mumkin: {e}")
-            
-    await message.answer("✅ Xabaringiz barcha adminlarga yetkazildi. Javobni kuting... ⏳")
+            await bot.send_message(admin_id, f"📩 Yangi murojaat (ID: `{message.from_user.id}`)", parse_mode="Markdown")
+            await message.copy_to(admin_id)
+        except: pass
+    await message.answer("✅ Xabaringiz yuborildi.")
 
-
-# 2. ADMINlardan BIRI JAVOB BERGANDA QOLGANLARINI OGOHLANTIRISH
-@dp.message(F.chat.type == "private", F.from_user.id.in_(ADMINS))
+# --- ADMIN JAVOBI ---
+@dp.message(F.from_user.id.in_(ADMINS), F.reply_to_message)
 async def handle_admin_reply(message: types.Message):
-    if not message.reply_to_message:
-        await message.answer("⚠️ Foydalanuvchiga javob yozish uchun, xabarga 'Reply' (Ответить) qilib yozing!")
-        return
-
     try:
-        reply_text = message.reply_to_message.text
-        target_user_id = None
+        reply_msg = message.reply_to_message
+        target_id = None
+        if "ID: `" in reply_msg.text:
+            target_id = int(reply_msg.text.split("ID: `")[1].split("`")[0])
         
-        # Xabar ichidan foydalanuvchi ID sini aniqlaymiz
-        for line in reply_text.split("\n"):
-            if "User ID:" in line:
-                target_user_id = int(line.split(":")[1].strip())
-                break
-        
-        if target_user_id:
-            # 1. Foydalanuvchining o'ziga javobni yuboramiz
-            admin_answer = f"👨‍💻 **Admin javobi:**\n\n{message.text}"
-            await bot.send_message(chat_id=target_user_id, text=admin_answer, parse_mode="Markdown")
-            
-            # Javob bergan adminning ismi
-            responder_name = message.from_user.full_name
-            
-            # 2. QOLGAN ADMINLARNI OGOHLANTIRISH
-            notification_text = (
-                f"✅ **Javob berildi!**\n\n"
-                f"👤 Foydalanuvchi ID: `{target_user_id}`\n"
-                f"👨‍💻 Javob bergan admin: {responder_name}\n"
-                f"💬 Berilgan javob: *{message.text}*"
-            )
-            
-            for admin_id in ADMINS:
-                # Javob bergan adminning o'ziga "Muvaffaqiyatli ketdi" deymiz, 
-                # qolganlarga esa kim javob berganini bildiramiz
-                if admin_id == message.from_user.id:
-                    await bot.send_message(chat_id=admin_id, text="🚀 Javobingiz foydalanuvchiga yetkazildi!")
-                else:
-                    try:
-                        await bot.send_message(chat_id=admin_id, text=notification_text, parse_mode="Markdown")
-                    except Exception:
-                        pass
-        else:
-            await message.reply("❌ Xabar matnidan foydalanuvchi ID-sini aniqlab bo'lmadi.")
-            
+        if target_id:
+            await bot.send_message(target_id, f"👨‍💻 Admin javobi:\n\n{message.text}")
+            conn = sqlite3.connect("bot.db")
+            conn.execute("UPDATE messages SET is_answered = 1 WHERE is_answered = 0 LIMIT 1")
+            conn.commit()
+            conn.close()
+            await message.answer("🚀 Javob yuborildi!")
     except Exception as e:
-        await message.reply(f"❌ Xatolik yuz berdi: {str(e)}")
+        await message.answer(f"Xatolik: {e}")
 
 async def main():
-    print("Ko'p adminli qayta aloqa boti ishga tushdi...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
