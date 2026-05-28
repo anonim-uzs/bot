@@ -4,7 +4,7 @@ from aiogram.filters import Command
 import asyncio
 
 BOT_TOKEN = "8827275523:AAF19lC2WCesrFvzP1g7uCbD3Jv3Ngo7lCI"
-ADMINS = [7844472879, 1368643171, 5368264484]  # Adminlar ID ro'yxati
+ADMINS = [7844472879, , ]  # Adminlar ID ro'yxati
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
