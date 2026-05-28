@@ -5,7 +5,7 @@ import asyncio
 import sqlite3
 
 BOT_TOKEN = "8827275523:AAGx5RiXv3KJtLGSt_vz6vGJb8uOncjtIKE"
-ADMINS = [7844472879]
+ADMINS = 7844472879
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
